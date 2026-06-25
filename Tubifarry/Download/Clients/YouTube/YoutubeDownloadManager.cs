@@ -4,6 +4,7 @@ using NzbDrone.Core.Indexers;
 using NzbDrone.Core.Organizer;
 using NzbDrone.Core.Parser.Model;
 using Tubifarry.Core.Records;
+using Tubifarry.Core.Utilities;
 using Tubifarry.Download.Base;
 using YouTubeMusicAPI.Client;
 
@@ -57,7 +58,13 @@ namespace Tubifarry.Download.Clients.YouTube
                 SponsorBlockApiEndpoint = provider.Settings.SponsorBlockApiEndpoint,
                 TrustedSessionGeneratorUrl = provider.Settings.TrustedSessionGeneratorUrl,
                 IsTrack = false,
-                ItemId = remoteAlbum.Release.DownloadUrl
+                ItemId = remoteAlbum.Release.DownloadUrl,
+                UseYtDlp = provider.Settings.UseYtDlp,
+                YtDlpPath = provider.Settings.YtDlpPath,
+                BgUtilUrl = provider.Settings.BgUtilUrl,
+                PlayerClient = provider.Settings.PlayerClient,
+                CookiePath = provider.Settings.CookiePath,
+                FFmpegPath = FfmpegLocator.ResolvedPath ?? provider.Settings.FFmpegPath
             };
 
             return new YouTubeDownloadRequest(remoteAlbum, options);

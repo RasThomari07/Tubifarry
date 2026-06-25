@@ -5,7 +5,6 @@ using NzbDrone.Core.ThingiProvider;
 using NzbDrone.Core.Validation;
 using Tubifarry.Core.Model;
 using Tubifarry.Core.Utilities;
-using Xabe.FFmpeg;
 
 namespace Tubifarry.Metadata.Converter
 {
@@ -13,12 +12,10 @@ namespace Tubifarry.Metadata.Converter
     {
         public AudioConverterSettingsValidator()
         {
-            // Validate FFmpegPath
+            // FFmpegPath is optional — FfmpegLocator auto-downloads when empty
             RuleFor(x => x.FFmpegPath)
-                .NotEmpty()
-                .WithMessage("FFmpeg path is required.")
                 .MustAsync(async (ffmpegPath, cancellationToken) => await TestFFmpeg(ffmpegPath))
-                .WithMessage("FFmpeg is not installed or invalid at the specified path.");
+                .WithMessage("FFmpeg not found and auto-download failed. Set the path or ensure internet access.");
 
             // Validate custom conversion rules
             RuleFor(x => x.CustomConversion)
@@ -77,29 +74,12 @@ namespace Tubifarry.Metadata.Converter
         private static bool IsValidStaticConversion(AudioConverterSettings settings) =>
             AudioFormatHelper.IsLossyFormat((AudioFormat)settings.TargetFormat) || (!settings.ConvertMP3 && !settings.ConvertAAC && !settings.ConvertOpus && !settings.ConvertOther);
 
-        private static async Task<bool> TestFFmpeg(string ffmpegPath)
+        private static async Task<bool> TestFFmpeg(string? ffmpegPath)
         {
-            if (string.IsNullOrWhiteSpace(ffmpegPath))
-                return false;
-
-            string oldPath = FFmpeg.ExecutablesPath;
-            FFmpeg.SetExecutablesPath(ffmpegPath);
+            FfmpegLocator.Invalidate();
+            string? resolved = await FfmpegLocator.ResolveAsync(ffmpegPath);
             AudioMetadataHandler.ResetFFmpegInstallationCheck();
-
-            if (!AudioMetadataHandler.CheckFFmpegInstalled())
-            {
-                try
-                {
-                    await AudioMetadataHandler.InstallFFmpeg(ffmpegPath);
-                }
-                catch
-                {
-                    if (!string.IsNullOrEmpty(oldPath))
-                        FFmpeg.SetExecutablesPath(oldPath);
-                    return false;
-                }
-            }
-            return true;
+            return resolved != null;
         }
     }
 
@@ -107,7 +87,7 @@ namespace Tubifarry.Metadata.Converter
     {
         private static readonly AudioConverterSettingsValidator Validator = new();
 
-        [FieldDefinition(0, Label = "FFmpeg Path", Type = FieldType.Path, Section = MetadataSectionType.Metadata, Placeholder = "/downloads/FFmpeg", HelpText = "Specify the path to the FFmpeg binary.")]
+        [FieldDefinition(0, Label = "FFmpeg Path", Type = FieldType.Path, Section = MetadataSectionType.Metadata, Placeholder = "/downloads/FFmpeg", HelpText = "Directory containing ffmpeg. Leave empty to auto-download a shared copy to ProgramData/Lidarr/tubifarry-ffmpeg.")]
         public string FFmpegPath { get; set; } = string.Empty;
 
         [FieldDefinition(1, Label = "Convert MP3", Type = FieldType.Checkbox, Section = MetadataSectionType.Metadata, HelpText = "Convert MP3 files.")]

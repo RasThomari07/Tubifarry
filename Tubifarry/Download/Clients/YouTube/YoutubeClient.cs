@@ -13,7 +13,6 @@ using Requests;
 using Tubifarry.Core.Model;
 using Tubifarry.Core.Records;
 using Tubifarry.Core.Utilities;
-using Xabe.FFmpeg;
 
 namespace Tubifarry.Download.Clients.YouTube
 {
@@ -73,25 +72,17 @@ namespace Tubifarry.Download.Clients.YouTube
 
         public async Task<ValidationFailure> TestFFmpeg()
         {
-            if (Settings.ReEncode != (int)ReEncodeOptions.Disabled || Settings.UseSponsorBlock)
-            {
-                string old = FFmpeg.ExecutablesPath;
-                FFmpeg.SetExecutablesPath(Settings.FFmpegPath);
-                AudioMetadataHandler.ResetFFmpegInstallationCheck();
-                if (!AudioMetadataHandler.CheckFFmpegInstalled())
-                {
-                    try
-                    {
-                        await AudioMetadataHandler.InstallFFmpeg(Settings.FFmpegPath);
-                    }
-                    catch (Exception ex)
-                    {
-                        if (!string.IsNullOrEmpty(old))
-                            FFmpeg.SetExecutablesPath(old);
-                        return new ValidationFailure("FFmpegInstallation", $"Failed to install FFmpeg: {ex.Message}");
-                    }
-                }
-            }
+            if (Settings.ReEncode == (int)ReEncodeOptions.Disabled && !Settings.UseSponsorBlock && !Settings.UseYtDlp)
+                return null!;
+
+            FfmpegLocator.Invalidate();
+            string? resolved = await FfmpegLocator.ResolveAsync(Settings.FFmpegPath);
+            AudioMetadataHandler.ResetFFmpegInstallationCheck();
+
+            if (resolved == null)
+                return new ValidationFailure("FFmpegInstallation",
+                    "FFmpeg not found and auto-download failed. Set the FFmpeg path or ensure internet access.");
+
             return null!;
         }
     }
