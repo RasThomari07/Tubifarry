@@ -28,16 +28,11 @@ namespace Tubifarry.Download.Clients.YouTube
                 .Must(chunks => chunks > 0 && chunks < 5)
                 .WithMessage("Chunks must be greater than 0 and smaller than 5.");
 
-            // Validate FFmpegPath (if re-encoding is enabled)
-            RuleFor(x => x.FFmpegPath)
-                .NotEmpty()
-                .When(x => x.ReEncode != (int)ReEncodeOptions.Disabled)
-                .WithMessage("FFmpeg path is required when re-encoding is enabled.");
-
+            // Validate FFmpegPath only when non-empty (auto-download handles the missing case)
             RuleFor(x => x.FFmpegPath)
                 .IsValidPath()
-                .When(x => x.ReEncode != (int)ReEncodeOptions.Disabled)
-                .WithMessage("Invalid FFmpeg path. Please provide a valid path to the FFmpeg binary.");
+                .When(x => !string.IsNullOrEmpty(x.FFmpegPath))
+                .WithMessage("Invalid FFmpeg path. Please provide a valid directory containing ffmpeg.");
 
             // Validate Random Delay Range
             RuleFor(x => x.RandomDelayMin)
@@ -70,6 +65,19 @@ namespace Tubifarry.Download.Clients.YouTube
                 .Must(url => Uri.IsWellFormedUriString(url, UriKind.Absolute))
                 .When(x => x.UseSponsorBlock && !string.IsNullOrEmpty(x.SponsorBlockApiEndpoint))
                 .WithMessage("SponsorBlock API endpoint must be a valid URL.");
+
+            // Validate yt-dlp backend settings
+            RuleFor(x => x.YtDlpPath)
+                .NotEmpty()
+                .When(x => x.UseYtDlp)
+                .WithMessage("yt-dlp path is required when the yt-dlp backend is enabled.")
+                .Must(path => string.IsNullOrEmpty(path) || System.IO.File.Exists(path))
+                .When(x => x.UseYtDlp)
+                .WithMessage("yt-dlp executable not found at the specified path.");
+
+            RuleFor(x => x.BgUtilUrl)
+                .Must(url => string.IsNullOrEmpty(url) || Uri.IsWellFormedUriString(url, UriKind.Absolute))
+                .WithMessage("bgutil POT Provider URL must be a valid URL if provided.");
         }
     }
 
@@ -89,7 +97,7 @@ namespace Tubifarry.Download.Clients.YouTube
         [FieldDefinition(3, Label = "ReEncode", Type = FieldType.Select, SelectOptions = typeof(ReEncodeOptions), HelpText = "Specify whether to re-encode audio files and how to handle FFmpeg.", Advanced = true)]
         public int ReEncode { get; set; } = (int)ReEncodeOptions.Disabled;
 
-        [FieldDefinition(4, Label = "FFmpeg Path", Type = FieldType.Path, Placeholder = "/downloads/FFmpeg", HelpText = "Specify the path to the FFmpeg binary. Not required if 'Disabled' is selected.", Advanced = true)]
+        [FieldDefinition(4, Label = "FFmpeg Path", Type = FieldType.Path, Placeholder = "/downloads/FFmpeg", HelpText = "Directory containing ffmpeg. Used for re-encoding and yt-dlp audio extraction. Leave empty to auto-download a shared copy to ProgramData/Lidarr/tubifarry-ffmpeg.", Advanced = true)]
         public string FFmpegPath { get; set; } = string.Empty;
 
         [FieldDefinition(5, Label = "File Chunk Count", Type = FieldType.Number, HelpText = "Number of chunks to split the download into. Each chunk is its own download. Note: Non-chunked downloads from YouTube are typically much slower.", Advanced = true)]
@@ -112,6 +120,18 @@ namespace Tubifarry.Download.Clients.YouTube
 
         [FieldDefinition(11, Label = "SponsorBlock API Endpoint", Type = FieldType.Textbox, Placeholder = "https://sponsor.ajay.app", HelpText = "SponsorBlock API endpoint URL. Change only if using a custom SponsorBlock instance.", Advanced = true)]
         public string SponsorBlockApiEndpoint { get; set; } = "https://sponsor.ajay.app";
+
+        [FieldDefinition(12, Label = "Use yt-dlp Backend", Type = FieldType.Checkbox, HelpText = "Download via yt-dlp + bgutil instead of the native YouTubeMusicAPI extraction (which is broken upstream: 'Failed to get streaming data'). Requires the yt-dlp path below and a running bgutil POT provider.")]
+        public bool UseYtDlp { get; set; } = true;
+
+        [FieldDefinition(13, Label = "yt-dlp Path", Type = FieldType.FilePath, Placeholder = @"C:\Users\you\AppData\Local\...\yt-dlp.exe", HelpText = "Full path to the yt-dlp executable. Must have the bgutil-ytdlp-pot-provider plugin installed and deno available for signature solving.", Advanced = true)]
+        public string YtDlpPath { get; set; } = string.Empty;
+
+        [FieldDefinition(14, Label = "bgutil POT Provider URL", Type = FieldType.Textbox, Placeholder = "http://127.0.0.1:4416", HelpText = "Base URL of the bgutil POT provider HTTP server that generates the GVS poToken.", Advanced = true)]
+        public string BgUtilUrl { get; set; } = "http://127.0.0.1:4416";
+
+        [FieldDefinition(15, Label = "yt-dlp Player Client", Type = FieldType.Textbox, Placeholder = "web_safari", HelpText = "YouTube player client passed to yt-dlp. Only web/tv clients consume the bgutil poToken (the default android_vr does not).", Advanced = true)]
+        public string PlayerClient { get; set; } = "web_safari";
 
         public NzbDroneValidationResult Validate() => new(Validator.Validate(this));
     }

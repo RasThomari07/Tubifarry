@@ -48,6 +48,26 @@ namespace Tubifarry.Download.Clients.YouTube
         /// </summary>
         public string? TrustedSessionGeneratorUrl { get; set; }
 
+        /// <summary>
+        /// Use the yt-dlp + bgutil backend instead of the native YouTubeMusicAPI extraction.
+        /// </summary>
+        public bool UseYtDlp { get; set; }
+
+        /// <summary>Full path to the yt-dlp executable.</summary>
+        public string? YtDlpPath { get; set; }
+
+        /// <summary>Base URL of the bgutil POT provider (poToken).</summary>
+        public string? BgUtilUrl { get; set; }
+
+        /// <summary>YouTube player client passed to yt-dlp (e.g. web_safari).</summary>
+        public string? PlayerClient { get; set; }
+
+        /// <summary>Path to the YouTube cookies.txt (passed to yt-dlp as --cookies).</summary>
+        public string? CookiePath { get; set; }
+
+        /// <summary>Directory containing ffmpeg, passed to yt-dlp as --ffmpeg-location.</summary>
+        public string? FFmpegPath { get; set; }
+
         public YouTubeDownloadOptions() { }
 
         protected YouTubeDownloadOptions(YouTubeDownloadOptions options) : base(options)
@@ -60,6 +80,12 @@ namespace Tubifarry.Download.Clients.YouTube
             UseSponsorBlock = options.UseSponsorBlock;
             SponsorBlockApiEndpoint = options.SponsorBlockApiEndpoint;
             TrustedSessionGeneratorUrl = options.TrustedSessionGeneratorUrl;
+            UseYtDlp = options.UseYtDlp;
+            YtDlpPath = options.YtDlpPath;
+            BgUtilUrl = options.BgUtilUrl;
+            PlayerClient = options.PlayerClient;
+            CookiePath = options.CookiePath;
+            FFmpegPath = options.FFmpegPath;
         }
     }
 }

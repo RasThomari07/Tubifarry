@@ -50,6 +50,11 @@ namespace Tubifarry.Download.Clients.YouTube
         protected override async Task ProcessDownloadAsync(CancellationToken token)
         {
             _logger.Trace($"Processing YouTube album: {ReleaseInfo.Title}");
+            if (Options.UseYtDlp)
+            {
+                await ProcessAlbumWithYtDlpAsync(Options.ItemId, token);
+                return;
+            }
             await ProcessAlbumAsync(Options.ItemId, token);
         }
 
@@ -105,6 +110,127 @@ namespace Tubifarry.Download.Clients.YouTube
             }
 
             _requestContainer.Add(_trackContainer);
+        }
+
+        /// <summary>
+        /// yt-dlp backend: download the whole album with yt-dlp + bgutil into the destination
+        /// folder, then run the normal post-processing (convert + tag + cover) on each file.
+        /// Lidarr imports via the tracked download item, so matching does not rely on tags.
+        /// </summary>
+        private async Task ProcessAlbumWithYtDlpAsync(string downloadUrl, CancellationToken token)
+        {
+            // Album metadata (titles, cover, track list) still comes from the API — only the
+            // stream extraction was broken upstream. Tolerate failure: yt-dlp downloads anyway.
+            AlbumInfo? albumInfo = null;
+            try
+            {
+                if (Options.YouTubeMusicClient != null)
+                {
+                    string albumBrowseID = await Options.YouTubeMusicClient.GetAlbumBrowseIdAsync(downloadUrl, token).ConfigureAwait(false);
+                    albumInfo = await Options.YouTubeMusicClient.GetAlbumInfoAsync(albumBrowseID, token).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, $"Could not fetch album metadata for '{ReleaseInfo.Album}'; proceeding with yt-dlp tags only.");
+            }
+
+            if (albumInfo?.Songs != null && albumInfo.Songs.Length > 0)
+            {
+                _expectedTrackCount = albumInfo.Songs.Length;
+                _albumData.Title = albumInfo.Name;
+                _albumCover = await TryDownloadCoverAsync(albumInfo, token).ConfigureAwait(false);
+            }
+
+            await ApplyRandomDelayAsync(token);
+
+            int completed = 0;
+            YtDlpDownloader.YtDlpRunOptions runOptions = new()
+            {
+                YtDlpPath = Options.YtDlpPath ?? string.Empty,
+                Url = downloadUrl,
+                DestinationPath = _destinationPath.FullPath,
+                BgUtilUrl = string.IsNullOrWhiteSpace(Options.BgUtilUrl) ? "http://127.0.0.1:4416" : Options.BgUtilUrl!,
+                PlayerClient = string.IsNullOrWhiteSpace(Options.PlayerClient) ? "web_safari" : Options.PlayerClient!,
+                CookiePath = Options.CookiePath,
+                FFmpegDir = Options.FFmpegPath
+            };
+
+            _logger.Debug($"Starting yt-dlp download for '{ReleaseInfo.Album}' into {_destinationPath.FullPath}");
+            int exitCode = await YtDlpDownloader.RunAsync(runOptions, _logger, _ =>
+            {
+                completed++;
+                _logger.Trace($"yt-dlp progress: {completed}/{(_expectedTrackCount > 0 ? _expectedTrackCount.ToString() : "?")}");
+            }, token).ConfigureAwait(false);
+
+            IReadOnlyList<string> files = YtDlpDownloader.EnumerateAudioFiles(_destinationPath.FullPath);
+            if (files.Count == 0)
+            {
+                LogAndAppendMessage($"yt-dlp produced no audio files for '{ReleaseInfo.Album}' (exit {exitCode}). Is bgutil running and deno available?", LogLevel.Error);
+                throw new InvalidOperationException($"yt-dlp download failed for '{ReleaseInfo.Album}' (exit {exitCode}).");
+            }
+
+            LogAndAppendMessage($"yt-dlp downloaded {files.Count} file(s) for '{ReleaseInfo.Album}' (exit {exitCode}). Post-processing…", LogLevel.Debug);
+
+            foreach (string file in files)
+            {
+                token.ThrowIfCancellationRequested();
+                AlbumSong? song = MatchSong(albumInfo, file);
+                await PostProcessYtDlpFileAsync(albumInfo, song, file, token).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>Maps a downloaded file ("NN - Title.ext") back to its album track.</summary>
+        private static AlbumSong? MatchSong(AlbumInfo? albumInfo, string filePath)
+        {
+            if (albumInfo?.Songs == null || albumInfo.Songs.Length == 0)
+                return null;
+
+            string name = Path.GetFileNameWithoutExtension(filePath);
+            System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(name, @"^\s*(\d+)");
+            if (m.Success && int.TryParse(m.Groups[1].Value, out int n))
+            {
+                AlbumSong? byNumber = albumInfo.Songs.FirstOrDefault(s => (s.SongNumber ?? -1) == n);
+                if (byNumber != null)
+                    return byNumber;
+                if (n >= 1 && n <= albumInfo.Songs.Length)
+                    return albumInfo.Songs[n - 1];
+            }
+            return null;
+        }
+
+        /// <summary>Post-processes a yt-dlp-downloaded file: convert, SponsorBlock, embed tags + cover.</summary>
+        private async Task PostProcessYtDlpFileAsync(AlbumInfo? albumInfo, AlbumSong? trackInfo, string trackPath, CancellationToken token)
+        {
+            if (!File.Exists(trackPath))
+                return;
+            try
+            {
+                AudioMetadataHandler audioData = new(trackPath) { AlbumCover = _albumCover, UseID3v2_3 = Options.UseID3v2_3 };
+
+                AudioFormat format = AudioFormatHelper.ConvertOptionToAudioFormat(Options.ReEncodeOptions);
+                if (Options.ReEncodeOptions == ReEncodeOptions.OnlyExtract)
+                    await audioData.TryExtractAudioFromVideoAsync();
+                else if (format != AudioFormat.Unknown)
+                    await audioData.TryConvertToFormatAsync(format);
+
+                if (Options.UseSponsorBlock && !string.IsNullOrWhiteSpace(trackInfo?.Id))
+                    await new SponsorBlock(audioData.TrackPath, trackInfo!.Id, Options.SponsorBlockApiEndpoint).LookupAndTrimAsync(token);
+
+                if (albumInfo != null && trackInfo != null)
+                {
+                    Album album = CreateAlbumFromYouTubeData(albumInfo);
+                    Track track = CreateTrackFromYouTubeData(trackInfo, albumInfo);
+                    if (!audioData.TryEmbedMetadata(album, track))
+                        _logger.Warn($"Failed to embed metadata for: {Path.GetFileName(audioData.TrackPath)}");
+                }
+
+                _logger.Trace($"Processed (yt-dlp): {Path.GetFileName(audioData.TrackPath)}");
+            }
+            catch (Exception ex)
+            {
+                LogAndAppendMessage($"Post-processing failed for {Path.GetFileName(trackPath)}: {ex.Message}", LogLevel.Error);
+            }
         }
 
         private void AddTrackDownloadRequest(AlbumInfo albumInfo, AlbumSong trackInfo, AudioStreamInfo audioStreamInfo, CancellationToken token)
