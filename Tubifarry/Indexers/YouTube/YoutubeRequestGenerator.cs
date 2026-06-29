@@ -4,6 +4,7 @@ using NzbDrone.Common.Http;
 using NzbDrone.Common.Instrumentation;
 using NzbDrone.Core.Indexers;
 using NzbDrone.Core.IndexerSearch.Definitions;
+using NzbDrone.Core.Music;
 using System.Net;
 using Tubifarry.Core.Records;
 using Tubifarry.Core.Replacements;
@@ -32,12 +33,25 @@ namespace Tubifarry.Indexers.YouTube
         public IndexerPageableRequestChain<LazyIndexerPageableRequest> GetRecentRequests()
         {
             // YouTube doesn't support RSS/recent releases functionality in a traditional sense
+            _youTubeIndexer.SearchAlbumQuery = null;
+            _youTubeIndexer.SearchArtistQuery = null;
             return new LazyIndexerPageableRequestChain();
         }
 
         public IndexerPageableRequestChain<LazyIndexerPageableRequest> GetSearchRequests(AlbumSearchCriteria searchCriteria)
         {
             _logger.Debug($"Generating search requests for album: '{searchCriteria.AlbumQuery}' by artist: '{searchCriteria.ArtistQuery}'");
+
+            // Propagate search context to the parser so it can override YouTube Music titles
+            // with MusicBrainz titles when the two are similar (avoids "Unable to parse" rejections).
+            _youTubeIndexer.SearchAlbumQuery = searchCriteria.AlbumQuery;
+            _youTubeIndexer.SearchArtistQuery = searchCriteria.ArtistQuery;
+
+            // AcceptableSizeSpecification rejects any release whose album has Duration=0 in the DB.
+            // MusicBrainz lacks duration data for many older/niche releases; refresh never fixes this.
+            // Patching the LazyLoaded cache in memory here is safe: the same Album object references
+            // are later used by AcceptableSizeSpecification via searchCriteria.Albums.
+            PatchZeroDurationAlbums(searchCriteria.Albums);
 
             LazyIndexerPageableRequestChain chain = new(5);
 
@@ -67,11 +81,37 @@ namespace Tubifarry.Indexers.YouTube
         {
             _logger.Debug($"Generating search requests for artist: '{searchCriteria.ArtistQuery}'");
 
+            _youTubeIndexer.SearchAlbumQuery = null;
+            _youTubeIndexer.SearchArtistQuery = searchCriteria.ArtistQuery;
+
             LazyIndexerPageableRequestChain chain = new(5);
             if (!string.IsNullOrEmpty(searchCriteria.ArtistQuery))
                 chain.AddFactory(() => GetRequests(searchCriteria.ArtistQuery, SearchCategory.Albums));
 
             return chain;
+        }
+
+        private void PatchZeroDurationAlbums(IList<Album>? albums)
+        {
+            if (albums == null) return;
+            const int estimatePerTrackMs = 210_000; // 3:30 / track
+            foreach (Album album in albums)
+            {
+                try
+                {
+                    List<AlbumRelease>? releases = album.AlbumReleases?.Value;
+                    if (releases == null) continue;
+                    AlbumRelease? release = releases.FirstOrDefault(r => r.Monitored)
+                        ?? (album.AnyReleaseOk ? releases.FirstOrDefault() : null);
+                    if (release == null || release.TrackCount == 0 || release.Duration != 0) continue;
+                    release.Duration = release.TrackCount * estimatePerTrackMs;
+                    _logger.Debug($"AcceptableSize patch: '{album.Title}' — estimated {release.Duration / 60000}min ({release.TrackCount} tracks × 3:30)");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn(ex, $"AcceptableSize patch failed for album '{album.Title}'");
+                }
+            }
         }
 
         private void UpdateTokens()
