@@ -28,6 +28,11 @@ namespace Tubifarry.Indexers.YouTube
         private readonly YouTubeRequestGenerator _requestGenerator;
         private readonly YouTubeParser _parser;
 
+        // Set by the request generator when doing a specific album search, read by the parser
+        // to override YouTube Music titles with MusicBrainz titles for better Lidarr matching.
+        internal string? SearchAlbumQuery { get; set; }
+        internal string? SearchArtistQuery { get; set; }
+
         public override ProviderMessage Message => new(
             "YouTube frequently blocks downloads to prevent unauthorized access. To confirm you're not a bot, you may need to provide additional verification. " +
             "This issue can often be partially resolved by using a `cookies.txt` file containing your login tokens. " +

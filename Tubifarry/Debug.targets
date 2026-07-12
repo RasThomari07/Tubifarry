@@ -10,6 +10,6 @@
 		<MakeDir Directories="$(DestinationFolder)" />
 		<Copy SourceFiles="$(TargetPath)" DestinationFiles="$(DestinationFolder)\Lidarr.Plugin.$(PluginName).dll" SkipUnchangedFiles="true" />
 		<Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFiles="$(DestinationFolder)\Lidarr.Plugin.$(PluginName).pdb" SkipUnchangedFiles="true" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
-		<Copy SourceFiles="$(TargetDir)$(TargetName).deps.json" DestinationFiles="$(DestinationFolder)\Lidarr.Plugin.$(PluginName).deps.json" SkipUnchangedFiles="true" Condition="Exists('$(TargetDir)$(TargetName).deps.json')" />
+		<!-- deps.json intentionally NOT copied: ILRepack merges all deps into the single DLL, the pre-merge deps.json lists Lidarr.Core/Common as external runtime files which causes FileLoadException on load -->
 	</Target>
 </Project>

@@ -22,6 +22,7 @@ namespace Tubifarry.Indexers.YouTube
     internal class YouTubeParser : IParseIndexerResponse
     {
         private const int DEFAULT_BITRATE = 128;
+        private const double TitleOverlapThreshold = 0.4;
         private readonly Logger _logger;
         private readonly YouTubeIndexer _youTubeIndexer;
         private YouTubeMusicClient? _youTubeClient;
@@ -191,18 +192,54 @@ namespace Tubifarry.Indexers.YouTube
             _youTubeClient = TrustedSessionHelper.CreateAuthenticatedClientAsync(_youTubeIndexer.Settings.TrustedSessionGeneratorUrl, _youTubeIndexer.Settings.CookiePath).GetAwaiter().GetResult();
         }
 
-        private static AlbumData ExtractAlbumInfo(AlbumSearchResult album) => new("Youtube", nameof(YoutubeDownloadProtocol))
+        private AlbumData ExtractAlbumInfo(AlbumSearchResult album)
         {
-            AlbumId = album.Id,
-            InfoUrl = $"https://music.youtube.com/playlist?list={album.Id}",
-            AlbumName = album.Name,
-            ArtistName = album.Artists.FirstOrDefault()?.Name ?? "Unknown Artist",
-            ReleaseDate = album.ReleaseYear > 0 ? album.ReleaseYear.ToString() : "0000-01-01",
-            ReleaseDatePrecision = "year",
-            CustomString = album.Thumbnails.FirstOrDefault()?.Url ?? string.Empty,
-            CoverResolution = album.Thumbnails.FirstOrDefault() is { } thumbnail
-                    ? $"{thumbnail.Width}x{thumbnail.Height}"
-                    : "Unknown Resolution"
-        };
+            string albumName = album.Name;
+            string artistName = album.Artists.FirstOrDefault()?.Name ?? "Unknown Artist";
+            string? searchAlbum = _youTubeIndexer.SearchAlbumQuery;
+            string? searchArtist = _youTubeIndexer.SearchArtistQuery;
+
+            if (!string.IsNullOrEmpty(searchAlbum))
+            {
+                double overlap = TokenOverlap(albumName, searchAlbum);
+                if (overlap >= TitleOverlapThreshold)
+                {
+                    _logger.Debug($"Title override: '{albumName}' → '{searchAlbum}' (overlap {overlap:P0})");
+                    albumName = searchAlbum;
+                    if (!string.IsNullOrEmpty(searchArtist) && !string.Equals(artistName, searchArtist, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.Debug($"Artist override: '{artistName}' → '{searchArtist}'");
+                        artistName = searchArtist;
+                    }
+                }
+            }
+
+            return new AlbumData("Youtube", nameof(YoutubeDownloadProtocol))
+            {
+                AlbumId = album.Id,
+                InfoUrl = $"https://music.youtube.com/playlist?list={album.Id}",
+                AlbumName = albumName,
+                ArtistName = artistName,
+                ReleaseDate = album.ReleaseYear > 0 ? album.ReleaseYear.ToString() : "0000-01-01",
+                ReleaseDatePrecision = "year",
+                CustomString = album.Thumbnails.FirstOrDefault()?.Url ?? string.Empty,
+                CoverResolution = album.Thumbnails.FirstOrDefault() is { } thumbnail
+                        ? $"{thumbnail.Width}x{thumbnail.Height}"
+                        : "Unknown Resolution"
+            };
+        }
+
+        private static double TokenOverlap(string a, string b)
+        {
+            HashSet<string> ta = Tokenize(a);
+            HashSet<string> tb = Tokenize(b);
+            int common = ta.Count(t => tb.Contains(t));
+            int union = ta.Count + tb.Count - common;
+            return union == 0 ? 0 : (double)common / union;
+        }
+
+        private static HashSet<string> Tokenize(string s) =>
+            [.. s.ToLowerInvariant()
+                .Split([' ', '-', ':', ',', '.', '/', '\\', '(', ')', '[', ']', '\'', '"'], StringSplitOptions.RemoveEmptyEntries)];
     }
 }
