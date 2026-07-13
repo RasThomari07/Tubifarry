@@ -16,7 +16,6 @@ namespace Tubifarry.Core.Utilities
     {
         // Pinned version — the server source and the yt-dlp plugin must match.
         public const string Version = "1.3.1";
-        private const int Port = 4416;
 
         private static Process? _server;
         private static string? _baseUrl;
@@ -62,15 +61,11 @@ namespace Tubifarry.Core.Utilities
                 if (!await EnsureProvisionedAsync(log).ConfigureAwait(false))
                     return null;
 
-                // Someone else (another Lidarr run, or the user's Docker) may already hold the port.
-                string existing = $"http://127.0.0.1:{Port}";
-                if (await PingAsync(existing).ConfigureAwait(false))
-                {
-                    log.Info($"bgutil: a POT provider is already listening on {existing}; reusing it");
-                    return _baseUrl = existing;
-                }
-
-                return await StartServerAsync(denoExe, log).ConfigureAwait(false);
+                // Start our own server on a free port. We deliberately do NOT reuse whatever is on
+                // a default port: a stale instance from an old/broken deno answers /ping but fails
+                // token generation, and a free port also avoids clashing with the user's Docker.
+                int port = FreePort();
+                return await StartServerAsync(denoExe, port, log).ConfigureAwait(false);
             }
             finally
             {
@@ -133,7 +128,7 @@ namespace Tubifarry.Core.Utilities
             }
         }
 
-        private static async Task<string?> StartServerAsync(string denoExe, NLog.Logger log)
+        private static async Task<string?> StartServerAsync(string denoExe, int port, NLog.Logger log)
         {
             try
             {
@@ -147,10 +142,10 @@ namespace Tubifarry.Core.Utilities
                     RedirectStandardError = true,
                 };
                 foreach (string a in new[] { "run", "-A", "--node-modules-dir=auto", "--allow-scripts",
-                    Path.Combine("src", "main.ts"), "-p", Port.ToString() })
+                    Path.Combine("src", "main.ts"), "-p", port.ToString() })
                     psi.ArgumentList.Add(a);
 
-                log.Info($"bgutil: starting POT server via deno on port {Port} (first run installs deps, ~2-3 min)");
+                log.Info($"bgutil: starting POT server via deno on port {port} (first run installs deps, ~2-3 min)");
                 Process proc = new() { StartInfo = psi, EnableRaisingEvents = true };
                 proc.OutputDataReceived += (_, e) => { if (e.Data != null) log.Trace($"[bgutil] {e.Data}"); };
                 proc.ErrorDataReceived += (_, e) => { if (e.Data != null) log.Trace($"[bgutil:err] {e.Data}"); };
@@ -159,8 +154,9 @@ namespace Tubifarry.Core.Utilities
                 proc.BeginErrorReadLine();
                 _server = proc;
 
-                // Poll /ping until the server answers (long timeout to cover first-run dep install).
-                string url = $"http://127.0.0.1:{Port}";
+                // Poll /ping until the server answers (long timeout to cover first-run dep install),
+                // then confirm it can actually mint a token before handing the URL to yt-dlp.
+                string url = $"http://localhost:{port}";
                 for (int i = 0; i < 120; i++)
                 {
                     if (proc.HasExited)
@@ -170,8 +166,14 @@ namespace Tubifarry.Core.Utilities
                     }
                     if (await PingAsync(url).ConfigureAwait(false))
                     {
-                        log.Info($"bgutil: POT server ready at {url}");
-                        return _baseUrl = url;
+                        if (await ValidateAsync(url).ConfigureAwait(false))
+                        {
+                            log.Info($"bgutil: POT server ready at {url}");
+                            return _baseUrl = url;
+                        }
+                        log.Error("bgutil: server answered /ping but could not mint a token (incompatible deno?); stopping it");
+                        try { proc.Kill(true); } catch { }
+                        return null;
                     }
                     await Task.Delay(2000).ConfigureAwait(false);
                 }
@@ -194,6 +196,32 @@ namespace Tubifarry.Core.Utilities
                 return resp.IsSuccessStatusCode;
             }
             catch { return false; }
+        }
+
+        /// <summary>Confirms the server actually mints a token (catches an old/incompatible deno).</summary>
+        private static async Task<bool> ValidateAsync(string baseUrl)
+        {
+            try
+            {
+                using CancellationTokenSource cts = new(TimeSpan.FromSeconds(45));
+                using StringContent body = new("{}", System.Text.Encoding.UTF8, "application/json");
+                using HttpResponseMessage resp = await HttpGet.HttpClient.PostAsync($"{baseUrl}/get_pot", body, cts.Token).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode)
+                    return false;
+                string json = await resp.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+                return json.Contains("poToken", StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>Picks an available loopback TCP port so we never clash with a stale server or Docker.</summary>
+        private static int FreePort()
+        {
+            using System.Net.Sockets.TcpListener l = new(System.Net.IPAddress.Loopback, 0);
+            l.Start();
+            int port = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
+            l.Stop();
+            return port;
         }
 
         private static async Task DownloadAsync(string url, string target)

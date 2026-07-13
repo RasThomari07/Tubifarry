@@ -56,7 +56,14 @@ namespace Tubifarry.Core.Utilities
                 if (File.Exists(Path.Combine(EmbeddedDir, ExeName)))
                     return Commit(EmbeddedDir);
 
-                // 2. System PATH
+                // 2. Auto-download a known-good deno. Preferred over a PATH deno because a stray
+                //    old/broken build there answers /ping but fails the bgutil BotGuard VM
+                //    ("SyntaxError: Invalid or unexpected token") — bgutil needs deno >= 2.0.
+                string? downloaded = await DownloadLatestAsync().ConfigureAwait(false);
+                if (downloaded != null)
+                    return downloaded;
+
+                // 3. System PATH (last resort, only if the download failed)
                 foreach (string entry in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
                 {
                     try
@@ -66,9 +73,7 @@ namespace Tubifarry.Core.Utilities
                     }
                     catch { /* malformed PATH entry */ }
                 }
-
-                // 3. Auto-download + extract
-                return await DownloadLatestAsync().ConfigureAwait(false);
+                return null;
             }
             finally
             {
