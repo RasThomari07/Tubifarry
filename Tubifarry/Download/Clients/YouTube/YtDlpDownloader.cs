@@ -36,6 +36,9 @@ namespace Tubifarry.Download.Clients.YouTube
             /// <summary>Directory containing deno, prepended to the process PATH (signature solver + bgutil).</summary>
             public string? DenoDir { get; init; }
 
+            /// <summary>Directory holding the bgutil yt-dlp plugin, passed via --plugin-dirs (self-managed provider).</summary>
+            public string? BgUtilPluginDir { get; init; }
+
             /// <summary>yt-dlp output template, relative to DestinationPath.</summary>
             public string OutputTemplate { get; init; } = "%(playlist_index)02d - %(title)s.%(ext)s";
 
@@ -75,6 +78,13 @@ namespace Tubifarry.Download.Clients.YouTube
                 "-x",
                 "-o", Path.Combine(opt.DestinationPath, opt.OutputTemplate),
             };
+            if (!string.IsNullOrWhiteSpace(opt.BgUtilPluginDir) && Directory.Exists(opt.BgUtilPluginDir))
+            {
+                // Make the self-managed bgutil yt-dlp plugin discoverable (the auto-downloaded
+                // yt-dlp has no plugins of its own).
+                args.Add("--plugin-dirs");
+                args.Add(opt.BgUtilPluginDir);
+            }
             if (!string.IsNullOrWhiteSpace(opt.CookiePath) && File.Exists(opt.CookiePath))
             {
                 args.Add("--cookies");

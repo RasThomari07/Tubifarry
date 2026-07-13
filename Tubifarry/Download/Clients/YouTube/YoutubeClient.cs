@@ -91,8 +91,18 @@ namespace Tubifarry.Download.Clients.YouTube
                     return new ValidationFailure("YtDlpPath",
                         "yt-dlp not found and auto-download failed. Set the yt-dlp path or ensure internet access.");
 
-                // Deno powers both the signature solver (ejs) and the bgutil POT provider; best effort.
+                // Deno powers both the signature solver (ejs) and the bgutil POT provider.
                 await DenoLocator.ResolveAsync();
+
+                // When no external bgutil URL is configured, self-host the POT provider via deno.
+                // The first run downloads the source + installs npm deps and can take a few minutes.
+                if (string.IsNullOrWhiteSpace(Settings.BgUtilUrl) && DenoLocator.ResolvedExe != null)
+                {
+                    string? url = await BgUtilProvider.EnsureRunningAsync(DenoLocator.ResolvedExe);
+                    if (url == null)
+                        return new ValidationFailure("BgUtilUrl",
+                            "bgutil POT provider could not be started. Set a bgutil URL or ensure deno + internet access.");
+                }
             }
 
             return null!;

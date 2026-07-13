@@ -125,8 +125,8 @@ namespace Tubifarry.Download.Clients.YouTube
         [FieldDefinition(13, Label = "yt-dlp Path", Type = FieldType.FilePath, Placeholder = @"leave empty to auto-download", HelpText = "Full path to the yt-dlp executable. Leave empty to auto-download and self-update a managed copy in ProgramData/Lidarr/tubifarry-ytdlp; deno is auto-provisioned too for signature solving.", Advanced = true)]
         public string YtDlpPath { get; set; } = string.Empty;
 
-        [FieldDefinition(14, Label = "bgutil POT Provider URL", Type = FieldType.Textbox, Placeholder = "http://127.0.0.1:4416", HelpText = "Base URL of the bgutil POT provider HTTP server that generates the GVS poToken.", Advanced = true)]
-        public string BgUtilUrl { get; set; } = "http://127.0.0.1:4416";
+        [FieldDefinition(14, Label = "bgutil POT Provider URL", Type = FieldType.Textbox, Placeholder = "leave empty to auto-manage", HelpText = "Base URL of an external bgutil POT provider (poToken GVS). Leave empty to auto-download and self-host the provider via the managed deno runtime in ProgramData/Lidarr/tubifarry-bgutil (no Docker/Node needed).", Advanced = true)]
+        public string BgUtilUrl { get; set; } = string.Empty;
 
         [FieldDefinition(15, Label = "yt-dlp Player Client", Type = FieldType.Textbox, Placeholder = "web_safari", HelpText = "YouTube player client passed to yt-dlp. Only web/tv clients consume the bgutil poToken (the default android_vr does not).", Advanced = true)]
         public string PlayerClient { get; set; } = "web_safari";

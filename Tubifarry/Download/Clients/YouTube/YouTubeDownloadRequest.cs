@@ -195,7 +195,8 @@ namespace Tubifarry.Download.Clients.YouTube
                 PlayerClient = string.IsNullOrWhiteSpace(Options.PlayerClient) ? "web_safari" : Options.PlayerClient!,
                 CookiePath = Options.CookiePath,
                 FFmpegDir = Options.FFmpegPath,
-                DenoDir = Options.DenoDir
+                DenoDir = Options.DenoDir,
+                BgUtilPluginDir = Options.BgUtilPluginDir
             };
 
             _logger.Debug($"Starting yt-dlp download for '{ReleaseInfo.Album}' into {_destinationPath.FullPath}");

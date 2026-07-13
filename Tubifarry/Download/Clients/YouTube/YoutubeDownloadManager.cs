@@ -62,7 +62,8 @@ namespace Tubifarry.Download.Clients.YouTube
                 UseYtDlp = provider.Settings.UseYtDlp,
                 YtDlpPath = YtDlpLocator.ResolvedPath ?? provider.Settings.YtDlpPath,
                 DenoDir = DenoLocator.ResolvedDir,
-                BgUtilUrl = provider.Settings.BgUtilUrl,
+                BgUtilUrl = string.IsNullOrWhiteSpace(provider.Settings.BgUtilUrl) ? BgUtilProvider.BaseUrl : provider.Settings.BgUtilUrl,
+                BgUtilPluginDir = BgUtilProvider.BaseUrl != null ? BgUtilProvider.PluginDir : null,
                 PlayerClient = provider.Settings.PlayerClient,
                 CookiePath = provider.Settings.CookiePath,
                 FFmpegPath = FfmpegLocator.ResolvedPath ?? provider.Settings.FFmpegPath

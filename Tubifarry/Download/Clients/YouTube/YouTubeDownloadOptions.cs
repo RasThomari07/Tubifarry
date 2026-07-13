@@ -62,6 +62,9 @@ namespace Tubifarry.Download.Clients.YouTube
         /// <summary>Base URL of the bgutil POT provider (poToken).</summary>
         public string? BgUtilUrl { get; set; }
 
+        /// <summary>Directory holding the bgutil yt-dlp plugin, passed to yt-dlp via --plugin-dirs (self-managed provider).</summary>
+        public string? BgUtilPluginDir { get; set; }
+
         /// <summary>YouTube player client passed to yt-dlp (e.g. web_safari).</summary>
         public string? PlayerClient { get; set; }
 
@@ -87,6 +90,7 @@ namespace Tubifarry.Download.Clients.YouTube
             YtDlpPath = options.YtDlpPath;
             DenoDir = options.DenoDir;
             BgUtilUrl = options.BgUtilUrl;
+            BgUtilPluginDir = options.BgUtilPluginDir;
             PlayerClient = options.PlayerClient;
             CookiePath = options.CookiePath;
             FFmpegPath = options.FFmpegPath;
