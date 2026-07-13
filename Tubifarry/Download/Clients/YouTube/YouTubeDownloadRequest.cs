@@ -27,18 +27,30 @@ namespace Tubifarry.Download.Clients.YouTube
         // never imports. Once yt-dlp has finished and every file is post-processed we flip this
         // flag and force the ClientItem to Completed (see ClientItem override below).
         private volatile bool _ytDlpCompleted;
+        private volatile int _ytDlpCompletedTracks;
 
         public override DownloadClientItem ClientItem
         {
             get
             {
                 DownloadClientItem item = base.ClientItem;
-                if (Options.UseYtDlp && _ytDlpCompleted)
+                if (Options.UseYtDlp)
                 {
-                    item.Status = DownloadItemStatus.Completed;
-                    item.CanMoveFiles = true;
-                    item.CanBeRemoved = true;
-                    item.RemainingSize = 0;
+                    if (_ytDlpCompleted)
+                    {
+                        item.Status = DownloadItemStatus.Completed;
+                        item.CanMoveFiles = true;
+                        item.CanBeRemoved = true;
+                        item.RemainingSize = 0;
+                    }
+                    else if (_expectedTrackCount > 0 && item.Status == DownloadItemStatus.Downloading)
+                    {
+                        // Per-track progress bar: the empty _trackContainer yields no byte-level
+                        // progress, so approximate RemainingSize from finished/expected tracks.
+                        long total = item.TotalSize > 0 ? item.TotalSize : ReleaseInfo.Size;
+                        int done = Math.Min(_ytDlpCompletedTracks, _expectedTrackCount);
+                        item.RemainingSize = total - (total * done / _expectedTrackCount);
+                    }
                 }
                 return item;
             }
@@ -182,7 +194,7 @@ namespace Tubifarry.Download.Clients.YouTube
             _logger.Debug($"Starting yt-dlp download for '{ReleaseInfo.Album}' into {_destinationPath.FullPath}");
             int exitCode = await YtDlpDownloader.RunAsync(runOptions, _logger, _ =>
             {
-                completed++;
+                _ytDlpCompletedTracks = ++completed;   // drives the per-track progress bar (ClientItem)
                 _logger.Trace($"yt-dlp progress: {completed}/{(_expectedTrackCount > 0 ? _expectedTrackCount.ToString() : "?")}");
             }, token).ConfigureAwait(false);
 
