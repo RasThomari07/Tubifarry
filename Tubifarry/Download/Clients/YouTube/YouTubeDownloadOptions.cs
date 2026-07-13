@@ -56,6 +56,9 @@ namespace Tubifarry.Download.Clients.YouTube
         /// <summary>Full path to the yt-dlp executable.</summary>
         public string? YtDlpPath { get; set; }
 
+        /// <summary>Directory containing the deno runtime, added to yt-dlp's PATH for the signature solver + bgutil.</summary>
+        public string? DenoDir { get; set; }
+
         /// <summary>Base URL of the bgutil POT provider (poToken).</summary>
         public string? BgUtilUrl { get; set; }
 
@@ -82,6 +85,7 @@ namespace Tubifarry.Download.Clients.YouTube
             TrustedSessionGeneratorUrl = options.TrustedSessionGeneratorUrl;
             UseYtDlp = options.UseYtDlp;
             YtDlpPath = options.YtDlpPath;
+            DenoDir = options.DenoDir;
             BgUtilUrl = options.BgUtilUrl;
             PlayerClient = options.PlayerClient;
             CookiePath = options.CookiePath;

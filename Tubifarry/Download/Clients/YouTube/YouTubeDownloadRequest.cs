@@ -194,7 +194,8 @@ namespace Tubifarry.Download.Clients.YouTube
                 BgUtilUrl = string.IsNullOrWhiteSpace(Options.BgUtilUrl) ? "http://127.0.0.1:4416" : Options.BgUtilUrl!,
                 PlayerClient = string.IsNullOrWhiteSpace(Options.PlayerClient) ? "web_safari" : Options.PlayerClient!,
                 CookiePath = Options.CookiePath,
-                FFmpegDir = Options.FFmpegPath
+                FFmpegDir = Options.FFmpegPath,
+                DenoDir = Options.DenoDir
             };
 
             _logger.Debug($"Starting yt-dlp download for '{ReleaseInfo.Album}' into {_destinationPath.FullPath}");

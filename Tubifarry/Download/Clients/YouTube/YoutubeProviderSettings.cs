@@ -66,14 +66,12 @@ namespace Tubifarry.Download.Clients.YouTube
                 .When(x => x.UseSponsorBlock && !string.IsNullOrEmpty(x.SponsorBlockApiEndpoint))
                 .WithMessage("SponsorBlock API endpoint must be a valid URL.");
 
-            // Validate yt-dlp backend settings
+            // yt-dlp path is optional: when empty, the backend auto-downloads and self-updates a
+            // managed copy (and auto-provisions deno). Only validate a path if one is supplied.
             RuleFor(x => x.YtDlpPath)
-                .NotEmpty()
-                .When(x => x.UseYtDlp)
-                .WithMessage("yt-dlp path is required when the yt-dlp backend is enabled.")
                 .Must(path => string.IsNullOrEmpty(path) || System.IO.File.Exists(path))
                 .When(x => x.UseYtDlp)
-                .WithMessage("yt-dlp executable not found at the specified path.");
+                .WithMessage("yt-dlp executable not found at the specified path (leave empty to auto-download).");
 
             RuleFor(x => x.BgUtilUrl)
                 .Must(url => string.IsNullOrEmpty(url) || Uri.IsWellFormedUriString(url, UriKind.Absolute))
@@ -124,7 +122,7 @@ namespace Tubifarry.Download.Clients.YouTube
         [FieldDefinition(12, Label = "Use yt-dlp Backend", Type = FieldType.Checkbox, HelpText = "Download via yt-dlp + bgutil instead of the native YouTubeMusicAPI extraction (which is broken upstream: 'Failed to get streaming data'). Requires the yt-dlp path below and a running bgutil POT provider.")]
         public bool UseYtDlp { get; set; } = true;
 
-        [FieldDefinition(13, Label = "yt-dlp Path", Type = FieldType.FilePath, Placeholder = @"C:\Users\you\AppData\Local\...\yt-dlp.exe", HelpText = "Full path to the yt-dlp executable. Must have the bgutil-ytdlp-pot-provider plugin installed and deno available for signature solving.", Advanced = true)]
+        [FieldDefinition(13, Label = "yt-dlp Path", Type = FieldType.FilePath, Placeholder = @"leave empty to auto-download", HelpText = "Full path to the yt-dlp executable. Leave empty to auto-download and self-update a managed copy in ProgramData/Lidarr/tubifarry-ytdlp; deno is auto-provisioned too for signature solving.", Advanced = true)]
         public string YtDlpPath { get; set; } = string.Empty;
 
         [FieldDefinition(14, Label = "bgutil POT Provider URL", Type = FieldType.Textbox, Placeholder = "http://127.0.0.1:4416", HelpText = "Base URL of the bgutil POT provider HTTP server that generates the GVS poToken.", Advanced = true)]

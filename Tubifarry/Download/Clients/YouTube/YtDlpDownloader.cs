@@ -33,6 +33,9 @@ namespace Tubifarry.Download.Clients.YouTube
             /// <summary>Directory containing ffmpeg, passed as --ffmpeg-location.</summary>
             public string? FFmpegDir { get; init; }
 
+            /// <summary>Directory containing deno, prepended to the process PATH (signature solver + bgutil).</summary>
+            public string? DenoDir { get; init; }
+
             /// <summary>yt-dlp output template, relative to DestinationPath.</summary>
             public string OutputTemplate { get; init; } = "%(playlist_index)02d - %(title)s.%(ext)s";
 
@@ -94,6 +97,11 @@ namespace Tubifarry.Download.Clients.YouTube
             };
             foreach (string a in args)
                 psi.ArgumentList.Add(a);
+
+            // Make the auto-managed deno visible to yt-dlp (EJS signature solver + bgutil) without
+            // requiring it on the system PATH.
+            if (!string.IsNullOrWhiteSpace(opt.DenoDir) && Directory.Exists(opt.DenoDir))
+                psi.Environment["PATH"] = opt.DenoDir + Path.PathSeparator + (Environment.GetEnvironmentVariable("PATH") ?? string.Empty);
 
             logger.Debug($"yt-dlp backend: \"{opt.YtDlpPath}\" {string.Join(' ', args)}");
 

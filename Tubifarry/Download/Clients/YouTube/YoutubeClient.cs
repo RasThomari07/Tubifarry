@@ -83,6 +83,18 @@ namespace Tubifarry.Download.Clients.YouTube
                 return new ValidationFailure("FFmpegInstallation",
                     "FFmpeg not found and auto-download failed. Set the FFmpeg path or ensure internet access.");
 
+            if (Settings.UseYtDlp)
+            {
+                YtDlpLocator.Invalidate();
+                string? ytdlp = await YtDlpLocator.ResolveAsync(Settings.YtDlpPath);
+                if (ytdlp == null)
+                    return new ValidationFailure("YtDlpPath",
+                        "yt-dlp not found and auto-download failed. Set the yt-dlp path or ensure internet access.");
+
+                // Deno powers both the signature solver (ejs) and the bgutil POT provider; best effort.
+                await DenoLocator.ResolveAsync();
+            }
+
             return null!;
         }
     }
