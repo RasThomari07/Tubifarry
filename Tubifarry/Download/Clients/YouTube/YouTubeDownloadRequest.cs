@@ -3,6 +3,7 @@ using DownloadAssistant.Options;
 using DownloadAssistant.Requests;
 using NLog;
 using NzbDrone.Core.Datastore;
+using NzbDrone.Core.Download;
 using NzbDrone.Core.Music;
 using NzbDrone.Core.Parser.Model;
 using Requests;
@@ -21,6 +22,28 @@ namespace Tubifarry.Download.Clients.YouTube
     /// </summary>
     public class YouTubeDownloadRequest : BaseDownloadRequest<YouTubeDownloadOptions>
     {
+        // yt-dlp path: the base status is derived from the request container, whose empty
+        // _trackContainer pins the aggregate to Paused so it never reports Completed and Lidarr
+        // never imports. Once yt-dlp has finished and every file is post-processed we flip this
+        // flag and force the ClientItem to Completed (see ClientItem override below).
+        private volatile bool _ytDlpCompleted;
+
+        public override DownloadClientItem ClientItem
+        {
+            get
+            {
+                DownloadClientItem item = base.ClientItem;
+                if (Options.UseYtDlp && _ytDlpCompleted)
+                {
+                    item.Status = DownloadItemStatus.Completed;
+                    item.CanMoveFiles = true;
+                    item.CanBeRemoved = true;
+                    item.RemainingSize = 0;
+                }
+                return item;
+            }
+        }
+
         public YouTubeDownloadRequest(RemoteAlbum remoteAlbum, YouTubeDownloadOptions? options) : base(remoteAlbum, options)
         {
             Options.YouTubeMusicClient ??= TrustedSessionHelper.CreateAuthenticatedClientAsync().GetAwaiter().GetResult();
@@ -178,6 +201,10 @@ namespace Tubifarry.Download.Clients.YouTube
                 AlbumSong? song = MatchSong(albumInfo, file);
                 await PostProcessYtDlpFileAsync(albumInfo, song, file, token).ConfigureAwait(false);
             }
+
+            // All files downloaded + post-processed → mark importable so ClientItem reports
+            // Completed (otherwise the empty _trackContainer keeps the status stuck on Paused).
+            _ytDlpCompleted = true;
         }
 
         /// <summary>Maps a downloaded file ("NN - Title.ext") back to its album track.</summary>
