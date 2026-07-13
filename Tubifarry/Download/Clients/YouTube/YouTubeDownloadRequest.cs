@@ -28,6 +28,7 @@ namespace Tubifarry.Download.Clients.YouTube
         // flag and force the ClientItem to Completed (see ClientItem override below).
         private volatile bool _ytDlpCompleted;
         private volatile int _ytDlpCompletedTracks;
+        private DateTime _ytDlpStartUtc = DateTime.MinValue;
 
         public override DownloadClientItem ClientItem
         {
@@ -45,11 +46,16 @@ namespace Tubifarry.Download.Clients.YouTube
                     }
                     else if (_expectedTrackCount > 0 && item.Status == DownloadItemStatus.Downloading)
                     {
-                        // Per-track progress bar: the empty _trackContainer yields no byte-level
-                        // progress, so approximate RemainingSize from finished/expected tracks.
+                        // Per-track progress: the empty _trackContainer yields no byte-level
+                        // progress, so approximate RemainingSize + ETA from finished/expected tracks.
                         long total = item.TotalSize > 0 ? item.TotalSize : ReleaseInfo.Size;
                         int done = Math.Min(_ytDlpCompletedTracks, _expectedTrackCount);
                         item.RemainingSize = total - (total * done / _expectedTrackCount);
+                        if (done > 0 && _ytDlpStartUtc != DateTime.MinValue)
+                        {
+                            double perTrackSec = (DateTime.UtcNow - _ytDlpStartUtc).TotalSeconds / done;
+                            item.RemainingTime = TimeSpan.FromSeconds(perTrackSec * (_expectedTrackCount - done));
+                        }
                     }
                 }
                 return item;
@@ -192,6 +198,7 @@ namespace Tubifarry.Download.Clients.YouTube
             };
 
             _logger.Debug($"Starting yt-dlp download for '{ReleaseInfo.Album}' into {_destinationPath.FullPath}");
+            _ytDlpStartUtc = DateTime.UtcNow;
             int exitCode = await YtDlpDownloader.RunAsync(runOptions, _logger, _ =>
             {
                 _ytDlpCompletedTracks = ++completed;   // drives the per-track progress bar (ClientItem)
