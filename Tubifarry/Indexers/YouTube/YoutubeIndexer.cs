@@ -33,6 +33,11 @@ namespace Tubifarry.Indexers.YouTube
         internal string? SearchAlbumQuery { get; set; }
         internal string? SearchArtistQuery { get; set; }
 
+        // Track count of the searched MusicBrainz release. The parser uses it to reject YouTube
+        // albums whose track count is grossly different (an 18-track album is not a 4-track EP),
+        // which the title override alone cannot tell apart.
+        internal int? SearchTrackCount { get; set; }
+
         public override ProviderMessage Message => new(
             "YouTube frequently blocks downloads to prevent unauthorized access. To confirm you're not a bot, you may need to provide additional verification. " +
             "This issue can often be partially resolved by using a `cookies.txt` file containing your login tokens. " +
