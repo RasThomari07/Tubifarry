@@ -22,11 +22,7 @@ namespace Tubifarry.Indexers.YouTube
     internal class YouTubeParser : IParseIndexerResponse
     {
         private const int DEFAULT_BITRATE = 128;
-        // Minimum Jaccard token overlap before the YouTube title is rewritten to the MusicBrainz one.
-        // 0.4 was too permissive: "Astrology" vs "Astrology 01" scores 0.50 (one extra token), so a
-        // different 18-track album was rewritten onto a 4-track EP and grabbed. 0.6 keeps the
-        // near-identical matches this override exists for while rejecting one-token-apart titles.
-        private const double TitleOverlapThreshold = 0.6;
+        private const double TitleOverlapThreshold = 0.4;
         private readonly Logger _logger;
         private readonly YouTubeIndexer _youTubeIndexer;
         private YouTubeMusicClient? _youTubeClient;
@@ -117,18 +113,6 @@ namespace Tubifarry.Indexers.YouTube
                     AlbumData albumData = ExtractAlbumInfo(album);
                     albumData.ParseReleaseDate();
                     EnrichAlbumWithYouTubeDataAsync(albumData).GetAwaiter().GetResult();
-
-                    // The title override can make a different record look like the requested one
-                    // (an 18-track "Astrology" album was rewritten onto the 4-track "Astrology 01"
-                    // EP, grabbed, then failed to import). The track count — only known once the
-                    // album is enriched — is what tells the two apart.
-                    if (!TrackCountPlausible(albumData.TotalTracks, _youTubeIndexer.SearchTrackCount))
-                    {
-                        _logger.Debug($"Skipped album '{albumData.AlbumName}' by '{albumData.ArtistName}': " +
-                                      $"{albumData.TotalTracks} tracks vs {_youTubeIndexer.SearchTrackCount} expected");
-                        continue;
-                    }
-
                     if (albumData.Bitrate > 0)
                     {
                         releases.Add(albumData.ToReleaseInfo());
@@ -243,20 +227,6 @@ namespace Tubifarry.Indexers.YouTube
                         ? $"{thumbnail.Width}x{thumbnail.Height}"
                         : "Unknown Resolution"
             };
-        }
-
-        /// <summary>
-        /// True when a YouTube album's track count is close enough to the searched MusicBrainz
-        /// release to plausibly be the same record. Tolerates bonus/deluxe editions (up to 2x) but
-        /// rejects gross mismatches. Returns true when either count is unknown, so this never
-        /// blocks a release on missing data.
-        /// </summary>
-        private static bool TrackCountPlausible(int ytTracks, int? expected)
-        {
-            if (expected is null or <= 0 || ytTracks <= 0)
-                return true;
-            double ratio = (double)Math.Max(ytTracks, expected.Value) / Math.Min(ytTracks, expected.Value);
-            return ratio <= 2.0;
         }
 
         private static double TokenOverlap(string a, string b)

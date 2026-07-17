@@ -35,7 +35,6 @@ namespace Tubifarry.Indexers.YouTube
             // YouTube doesn't support RSS/recent releases functionality in a traditional sense
             _youTubeIndexer.SearchAlbumQuery = null;
             _youTubeIndexer.SearchArtistQuery = null;
-            _youTubeIndexer.SearchTrackCount = null;
             return new LazyIndexerPageableRequestChain();
         }
 
@@ -47,7 +46,6 @@ namespace Tubifarry.Indexers.YouTube
             // with MusicBrainz titles when the two are similar (avoids "Unable to parse" rejections).
             _youTubeIndexer.SearchAlbumQuery = searchCriteria.AlbumQuery;
             _youTubeIndexer.SearchArtistQuery = searchCriteria.ArtistQuery;
-            _youTubeIndexer.SearchTrackCount = ExpectedTrackCount(searchCriteria.Albums);
 
             // AcceptableSizeSpecification rejects any release whose album has Duration=0 in the DB.
             // MusicBrainz lacks duration data for many older/niche releases; refresh never fixes this.
@@ -85,33 +83,12 @@ namespace Tubifarry.Indexers.YouTube
 
             _youTubeIndexer.SearchAlbumQuery = null;
             _youTubeIndexer.SearchArtistQuery = searchCriteria.ArtistQuery;
-            _youTubeIndexer.SearchTrackCount = null;
 
             LazyIndexerPageableRequestChain chain = new(5);
             if (!string.IsNullOrEmpty(searchCriteria.ArtistQuery))
                 chain.AddFactory(() => GetRequests(searchCriteria.ArtistQuery, SearchCategory.Albums));
 
             return chain;
-        }
-
-        /// <summary>
-        /// Track count of the release Lidarr is searching for, or null when unknown. The parser uses
-        /// it to drop YouTube albums that are obviously a different record than the one requested.
-        /// </summary>
-        private static int? ExpectedTrackCount(IList<Album>? albums)
-        {
-            try
-            {
-                List<AlbumRelease>? releases = albums?.FirstOrDefault()?.AlbumReleases?.Value;
-                if (releases == null)
-                    return null;
-                AlbumRelease? release = releases.FirstOrDefault(r => r.Monitored) ?? releases.FirstOrDefault();
-                return release is { TrackCount: > 0 } ? release.TrackCount : null;
-            }
-            catch
-            {
-                return null;
-            }
         }
 
         private void PatchZeroDurationAlbums(IList<Album>? albums)
