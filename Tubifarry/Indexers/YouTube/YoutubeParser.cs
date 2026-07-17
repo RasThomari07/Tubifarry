@@ -254,12 +254,32 @@ namespace Tubifarry.Indexers.YouTube
             return !NumberTokens(ytAlbumName).SetEquals(NumberTokens(searchAlbum));
         }
 
-        // Volume/disc/part markers = standalone 1-3 digit numbers. 4-digit years ("2011") are ignored
-        // so "Congé Récession" vs "Congé Récession (2011 Remix)" still matches.
-        private static readonly Regex _volumeNumber = new(@"\b\d{1,3}\b", RegexOptions.Compiled);
+        // Volume/disc/part markers = standalone 1-3 digit numbers (4-digit years like "2011" are
+        // ignored) plus uppercase Roman numerals, so "33" and "XXXIII" compare as the same number.
+        private static readonly Regex _arabicNumber = new(@"\b\d{1,3}\b", RegexOptions.Compiled);
+        private static readonly Regex _romanNumber = new(
+            @"\b(?=[MDCLXVI]{2,}\b)M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})\b",
+            RegexOptions.Compiled);
 
-        private static HashSet<int> NumberTokens(string s) =>
-            [.. _volumeNumber.Matches(s).Select(m => int.Parse(m.Value))];
+        private static HashSet<int> NumberTokens(string s)
+        {
+            HashSet<int> nums = [.. _arabicNumber.Matches(s).Select(m => int.Parse(m.Value))];
+            foreach (Match m in _romanNumber.Matches(s))
+                nums.Add(RomanToInt(m.Value));
+            return nums;
+        }
+
+        private static int RomanToInt(string roman)
+        {
+            int total = 0, prev = 0;
+            foreach (char ch in roman.Reverse())
+            {
+                int val = ch switch { 'I' => 1, 'V' => 5, 'X' => 10, 'L' => 50, 'C' => 100, 'D' => 500, 'M' => 1000, _ => 0 };
+                total += val < prev ? -val : val;
+                prev = val;
+            }
+            return total;
+        }
 
         private static double TokenOverlap(string a, string b)
         {
