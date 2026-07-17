@@ -4,6 +4,7 @@ using NzbDrone.Common.Instrumentation;
 using NzbDrone.Core.Indexers;
 using NzbDrone.Core.Parser.Model;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using Tubifarry.Core.Model;
 using Tubifarry.Core.Records;
 using Tubifarry.Core.Utilities;
@@ -107,6 +108,15 @@ namespace Tubifarry.Indexers.YouTube
             {
                 if (searchResult is not AlbumSearchResult album)
                     continue;
+
+                // A title-similar album whose volume/disc/part number differs from the search is a
+                // different record ("Astrology" for a search of "Astrology 01"). Without this guard the
+                // title override rewrites it onto the requested EP, it gets grabbed, then fails to import.
+                if (IsVolumeMismatch(album.Name, _youTubeIndexer.SearchAlbumQuery))
+                {
+                    _logger.Debug($"Skipped album '{album.Name}': volume/number mismatch with search '{_youTubeIndexer.SearchAlbumQuery}'");
+                    continue;
+                }
 
                 try
                 {
@@ -228,6 +238,28 @@ namespace Tubifarry.Indexers.YouTube
                         : "Unknown Resolution"
             };
         }
+
+        /// <summary>
+        /// True when <paramref name="ytAlbumName"/> is title-similar enough to be rewritten onto the
+        /// searched album, yet carries a different volume/disc/part number — i.e. a different record.
+        /// Only near-identical titles (the ones the override targets) are guarded, so ordinary title
+        /// overrides ("Wacko" → "MC Wack", no numbers involved) are unaffected.
+        /// </summary>
+        private bool IsVolumeMismatch(string ytAlbumName, string? searchAlbum)
+        {
+            if (string.IsNullOrEmpty(searchAlbum) || string.IsNullOrEmpty(ytAlbumName))
+                return false;
+            if (TokenOverlap(ytAlbumName, searchAlbum) < TitleOverlapThreshold)
+                return false;
+            return !NumberTokens(ytAlbumName).SetEquals(NumberTokens(searchAlbum));
+        }
+
+        // Volume/disc/part markers = standalone 1-3 digit numbers. 4-digit years ("2011") are ignored
+        // so "Congé Récession" vs "Congé Récession (2011 Remix)" still matches.
+        private static readonly Regex _volumeNumber = new(@"\b\d{1,3}\b", RegexOptions.Compiled);
+
+        private static HashSet<int> NumberTokens(string s) =>
+            [.. _volumeNumber.Matches(s).Select(m => int.Parse(m.Value))];
 
         private static double TokenOverlap(string a, string b)
         {
