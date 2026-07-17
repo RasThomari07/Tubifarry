@@ -150,6 +150,8 @@ namespace Tubifarry.Core.Utilities
                 proc.OutputDataReceived += (_, e) => { if (e.Data != null) log.Trace($"[bgutil] {e.Data}"); };
                 proc.ErrorDataReceived += (_, e) => { if (e.Data != null) log.Trace($"[bgutil:err] {e.Data}"); };
                 proc.Start();
+                // Tie the deno server to Lidarr's lifetime so it can't outlive a restart as an orphan.
+                ChildProcessTracker.Track(proc);
                 proc.BeginOutputReadLine();
                 proc.BeginErrorReadLine();
                 _server = proc;

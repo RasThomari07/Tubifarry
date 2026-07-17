@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using NLog;
+using Tubifarry.Core.Utilities;
 
 namespace Tubifarry.Download.Clients.YouTube
 {
@@ -140,6 +141,9 @@ namespace Tubifarry.Download.Clients.YouTube
             };
 
             proc.Start();
+            // Tie yt-dlp (and the deno signature solver it spawns) to Lidarr's lifetime so a
+            // Lidarr crash/restart mid-download can't leave orphaned deno processes behind.
+            ChildProcessTracker.Track(proc);
             proc.BeginOutputReadLine();
             proc.BeginErrorReadLine();
 
