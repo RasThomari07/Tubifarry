@@ -67,8 +67,12 @@ namespace Tubifarry.Download.Clients.YouTube
                 // Download the JS challenge solver (signature + n). Needs deno on PATH.
                 "--remote-components", "ejs:github",
                 // poToken provider (bgutil) + a player client that actually consumes it.
+                // fetch_pot=always forces yt-dlp to attach a PO Token to the *player* request,
+                // not just the GVS stream. YouTube now gates the player request itself: without
+                // this, web_music returns "playability: LOGIN_REQUIRED / Sign in to confirm
+                // you're not a bot" and the download never starts, even though bgutil is up.
                 "--extractor-args", $"youtubepot-bgutilhttp:base_url={opt.BgUtilUrl}",
-                "--extractor-args", $"youtube:player_client={opt.PlayerClient}",
+                "--extractor-args", $"youtube:player_client={opt.PlayerClient};fetch_pot=always",
                 // Anti-bot pacing.
                 "--sleep-requests", opt.SleepRequests.ToString(CultureInfo.InvariantCulture),
                 "--sleep-interval", "1",
