@@ -160,6 +160,15 @@ namespace Tubifarry.Download.Clients.YouTube
         /// </summary>
         private async Task ProcessAlbumWithYtDlpAsync(string downloadUrl, CancellationToken token)
         {
+            // Circuit breaker: if YouTube recently soft-blocked us, don't touch yt-dlp (or the
+            // YouTube API) at all — each call while blocked only deepens the penalty.
+            if (YouTubeCircuitBreaker.IsOpen)
+            {
+                int mins = (int)Math.Ceiling(YouTubeCircuitBreaker.Remaining.TotalMinutes);
+                LogAndAppendMessage($"YouTube cool-down active (~{mins} min left); skipping '{ReleaseInfo.Album}' without calling yt-dlp.", LogLevel.Warn);
+                throw new InvalidOperationException($"YouTube cool-down active (~{mins} min left); skipped '{ReleaseInfo.Album}'.");
+            }
+
             // Album metadata (titles, cover, track list) still comes from the API — only the
             // stream extraction was broken upstream. Tolerate failure: yt-dlp downloads anyway.
             AlbumInfo? albumInfo = null;
@@ -192,7 +201,7 @@ namespace Tubifarry.Download.Clients.YouTube
                 Url = downloadUrl,
                 DestinationPath = _destinationPath.FullPath,
                 BgUtilUrl = string.IsNullOrWhiteSpace(Options.BgUtilUrl) ? "http://127.0.0.1:4416" : Options.BgUtilUrl!,
-                PlayerClient = string.IsNullOrWhiteSpace(Options.PlayerClient) ? "web_safari" : Options.PlayerClient!,
+                PlayerClient = string.IsNullOrWhiteSpace(Options.PlayerClient) ? "web_music" : Options.PlayerClient!,
                 CookiePath = Options.CookiePath,
                 FFmpegDir = Options.FFmpegPath,
                 DenoDir = Options.DenoDir,
@@ -201,18 +210,30 @@ namespace Tubifarry.Download.Clients.YouTube
 
             _logger.Debug($"Starting yt-dlp download for '{ReleaseInfo.Album}' into {_destinationPath.FullPath}");
             _ytDlpStartUtc = DateTime.UtcNow;
-            int exitCode = await YtDlpDownloader.RunAsync(runOptions, _logger, _ =>
+            YtDlpDownloader.YtDlpResult ytResult = await YtDlpDownloader.RunAsync(runOptions, _logger, _ =>
             {
                 _ytDlpCompletedTracks = ++completed;   // drives the per-track progress bar (ClientItem)
                 _logger.Trace($"yt-dlp progress: {completed}/{(_expectedTrackCount > 0 ? _expectedTrackCount.ToString() : "?")}");
             }, token).ConfigureAwait(false);
+            int exitCode = ytResult.ExitCode;
+
+            // Trip on ANY soft-block, even a partial one. YouTube usually blocks mid-album, so
+            // some tracks land before the wall goes up; only tripping on a zero-file run left the
+            // breaker closed exactly when it was needed and let the next album re-arm the penalty.
+            // Files already fetched are still post-processed and imported below.
+            if (ytResult.SoftBlocked)
+                YouTubeCircuitBreaker.Trip(_logger);
 
             IReadOnlyList<string> files = YtDlpDownloader.EnumerateAudioFiles(_destinationPath.FullPath);
             if (files.Count == 0)
             {
-                LogAndAppendMessage($"yt-dlp produced no audio files for '{ReleaseInfo.Album}' (exit {exitCode}). Is bgutil running and deno available?", LogLevel.Error);
+                LogAndAppendMessage($"yt-dlp produced no audio files for '{ReleaseInfo.Album}' (exit {exitCode}).{(ytResult.SoftBlocked ? " YouTube soft-block detected — pausing YouTube downloads." : " Is bgutil running and deno available?")}", LogLevel.Error);
                 throw new InvalidOperationException($"yt-dlp download failed for '{ReleaseInfo.Album}' (exit {exitCode}).");
             }
+
+            // A clean run means YouTube is serving us again — clear any prior cool-down.
+            if (!ytResult.SoftBlocked)
+                YouTubeCircuitBreaker.Reset();
 
             LogAndAppendMessage($"yt-dlp downloaded {files.Count} file(s) for '{ReleaseInfo.Album}' (exit {exitCode}). Post-processing…", LogLevel.Debug);
 

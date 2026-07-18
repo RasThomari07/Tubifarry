@@ -16,6 +16,9 @@ namespace Tubifarry.Download.Clients.YouTube
     {
         public static readonly string[] AudioExtensions = { ".m4a", ".opus", ".mp3", ".ogg", ".webm", ".aac", ".flac" };
 
+        /// <summary>Result of a yt-dlp run: process exit code + whether YouTube signalled an IP/session soft-block.</summary>
+        public readonly record struct YtDlpResult(int ExitCode, bool SoftBlocked);
+
         public record YtDlpRunOptions
         {
             /// <summary>Full path to the yt-dlp executable.</summary>
@@ -28,7 +31,10 @@ namespace Tubifarry.Download.Clients.YouTube
             public required string DestinationPath { get; init; }
 
             public string BgUtilUrl { get; init; } = "http://127.0.0.1:4416";
-            public string PlayerClient { get; init; } = "web_safari";
+            // web_music is music.youtube.com's own client. Measured 12 Jul on one captcha-blocked
+            // track, same IP + cookies: web / web_safari / mweb -> captcha; tv -> DRM-only formats
+            // (no audio); web_music and tv_simply -> audio served. Fallback: tv_simply.
+            public string PlayerClient { get; init; } = "web_music";
             public string? CookiePath { get; init; }
 
             /// <summary>Directory containing ffmpeg, passed as --ffmpeg-location.</summary>
@@ -52,7 +58,7 @@ namespace Tubifarry.Download.Clients.YouTube
         /// may still have downloaded). <paramref name="onTrackCompleted"/> fires once
         /// per finished file so the caller can report queue progress.
         /// </summary>
-        public static async Task<int> RunAsync(YtDlpRunOptions opt, Logger logger, Action<string>? onTrackCompleted, CancellationToken token)
+        public static async Task<YtDlpResult> RunAsync(YtDlpRunOptions opt, Logger logger, Action<string>? onTrackCompleted, CancellationToken token)
         {
             if (!File.Exists(opt.YtDlpPath))
                 throw new FileNotFoundException($"yt-dlp executable not found: {opt.YtDlpPath}");
@@ -74,10 +80,12 @@ namespace Tubifarry.Download.Clients.YouTube
                 // you're not a bot" and the download never starts, even though bgutil is up.
                 "--extractor-args", $"youtubepot-bgutilhttp:base_url={opt.BgUtilUrl}",
                 "--extractor-args", $"youtube:player_client={opt.PlayerClient};fetch_pot=always",
-                // Anti-bot pacing.
+                // Anti-bot pacing. These are the values yt-dlp itself recommends in its
+                // rate-limit error message (the "-t sleep" preset); 1/5 was too aggressive and
+                // kept the session rate-limited.
                 "--sleep-requests", opt.SleepRequests.ToString(CultureInfo.InvariantCulture),
-                "--sleep-interval", "1",
-                "--max-sleep-interval", "5",
+                "--sleep-interval", "10",
+                "--max-sleep-interval", "20",
                 "--fragment-retries", "3",
                 "-f", "bestaudio/best",
                 "-x",
@@ -134,10 +142,15 @@ namespace Tubifarry.Download.Clients.YouTube
                     onTrackCompleted(e.Data);
                 }
             };
+            bool softBlocked = false;
+            object softBlockLock = new();
             proc.ErrorDataReceived += (_, e) =>
             {
-                if (e.Data != null)
-                    logger.Trace($"[yt-dlp:err] {e.Data}");
+                if (e.Data == null)
+                    return;
+                logger.Trace($"[yt-dlp:err] {e.Data}");
+                if (YouTubeCircuitBreaker.IsSoftBlockMarker(e.Data))
+                    lock (softBlockLock) softBlocked = true;
             };
 
             proc.Start();
@@ -150,6 +163,7 @@ namespace Tubifarry.Download.Clients.YouTube
             try
             {
                 await proc.WaitForExitAsync(token).ConfigureAwait(false);
+                proc.WaitForExit(); // flush async stdout/stderr handlers before reading softBlocked
             }
             catch (OperationCanceledException)
             {
@@ -157,7 +171,9 @@ namespace Tubifarry.Download.Clients.YouTube
                 throw;
             }
 
-            return proc.ExitCode;
+            bool wasSoftBlocked;
+            lock (softBlockLock) wasSoftBlocked = softBlocked;
+            return new YtDlpResult(proc.ExitCode, wasSoftBlocked);
         }
 
         /// <summary>Enumerates audio files produced in the destination folder, sorted by name.</summary>

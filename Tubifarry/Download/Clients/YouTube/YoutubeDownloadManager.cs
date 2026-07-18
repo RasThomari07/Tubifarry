@@ -26,7 +26,11 @@ namespace Tubifarry.Download.Clients.YouTube
 
         public YoutubeDownloadManager(Logger logger) : base(logger)
         {
-            _requesthandler.MaxParallelism = 2;
+            // Serialise album downloads. YouTube rate-limits per IP/session, so two albums
+            // downloading at once doubles the request rate against the same quota and re-arms
+            // the penalty faster than it expires (the 9-12 Jul outage: a ~1h block snowballed
+            // into three days). One album at a time is what the youtube-blackhole script did.
+            _requesthandler.MaxParallelism = 1;
         }
 
         protected override async Task<YouTubeDownloadRequest> CreateDownloadRequest(

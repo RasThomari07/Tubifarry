@@ -12,7 +12,6 @@ using Tubifarry.Download.Clients.YouTube;
 using YouTubeMusicAPI.Client;
 using YouTubeMusicAPI.Models.Info;
 using YouTubeMusicAPI.Models.Search;
-using YouTubeMusicAPI.Models.Streaming;
 using YouTubeMusicAPI.Pagination;
 
 namespace Tubifarry.Indexers.YouTube
@@ -160,32 +159,13 @@ namespace Tubifarry.Indexers.YouTube
                 albumData.TotalTracks = albumInfo.SongCount;
                 albumData.ExplicitContent = albumInfo.Songs.Any(x => x.IsExplicit);
 
-                AlbumSong? firstTrack = albumInfo.Songs.FirstOrDefault(s => !string.IsNullOrEmpty(s.Id));
-                if (firstTrack?.Id != null)
-                {
-                    try
-                    {
-                        StreamingData streamingData = await _youTubeClient.GetStreamingDataAsync(firstTrack.Id);
-                        AudioStreamInfo? highestQualityStream = streamingData.StreamInfo
-                            .OfType<AudioStreamInfo>()
-                            .OrderByDescending(info => info.Bitrate)
-                            .FirstOrDefault();
-
-                        if (highestQualityStream != null)
-                            albumData.Bitrate = AudioFormatHelper.RoundToStandardBitrate(highestQualityStream.Bitrate / 1000);
-                        else
-                            albumData.Bitrate = DEFAULT_BITRATE;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Debug(ex, $"Failed to get streaming data for track '{firstTrack.Name}' in album '{albumData.AlbumName}'");
-                        albumData.Bitrate = DEFAULT_BITRATE;
-                    }
-                }
-                else
-                {
-                    albumData.Bitrate = DEFAULT_BITRATE;
-                }
+                // The per-track streaming probe (GetStreamingDataAsync) can no longer succeed:
+                // YouTubeMusicAPI's signature/poToken path is broken upstream, so it threw for every
+                // track (bot check / Jint "Cannot read property 'call'") and the bitrate fell back to
+                // DEFAULT anyway — at the cost of one doomed YouTube call per search result, which
+                // only helps get the IP soft-blocked during big library scans. Downloads run through
+                // yt-dlp (which reads the real bitrate), so the indexer just defaults here.
+                albumData.Bitrate = DEFAULT_BITRATE;
             }
             catch (Exception ex)
             {

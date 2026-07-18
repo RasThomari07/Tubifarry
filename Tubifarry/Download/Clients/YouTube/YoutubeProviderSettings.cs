@@ -128,8 +128,8 @@ namespace Tubifarry.Download.Clients.YouTube
         [FieldDefinition(14, Label = "bgutil POT Provider URL", Type = FieldType.Textbox, Placeholder = "leave empty to auto-manage", HelpText = "Base URL of an external bgutil POT provider (poToken GVS). Leave empty to auto-download and self-host the provider via the managed deno runtime in ProgramData/Lidarr/tubifarry-bgutil (no Docker/Node needed).", Advanced = true)]
         public string BgUtilUrl { get; set; } = string.Empty;
 
-        [FieldDefinition(15, Label = "yt-dlp Player Client", Type = FieldType.Textbox, Placeholder = "web_safari", HelpText = "YouTube player client passed to yt-dlp. Only web/tv clients consume the bgutil poToken (the default android_vr does not).", Advanced = true)]
-        public string PlayerClient { get; set; } = "web_safari";
+        [FieldDefinition(15, Label = "yt-dlp Player Client", Type = FieldType.Textbox, Placeholder = "web_music", HelpText = "YouTube player client passed to yt-dlp. web_music is music.youtube.com's own client and serves audio; web/web_safari/mweb hit the captcha wall and tv returns DRM-only formats. Fallback: tv_simply.", Advanced = true)]
+        public string PlayerClient { get; set; } = "web_music";
 
         public NzbDroneValidationResult Validate() => new(Validator.Validate(this));
     }
