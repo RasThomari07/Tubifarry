@@ -33,6 +33,12 @@ namespace Tubifarry.Indexers.YouTube
         internal string? SearchAlbumQuery { get; set; }
         internal string? SearchArtistQuery { get; set; }
 
+        // Track count of the AlbumRelease the import will be matched against, for the album being
+        // searched right now; null when there is no single unambiguous target (RSS, artist search,
+        // no monitored release, TrackCount left at 0). Read by the parser to drop playlists and
+        // discographies before they are grabbed. Null means "do not filter".
+        internal int? SearchAlbumTrackCount { get; set; }
+
         public override ProviderMessage Message => new(
             "YouTube frequently blocks downloads to prevent unauthorized access. To confirm you're not a bot, you may need to provide additional verification. " +
             "This issue can often be partially resolved by using a `cookies.txt` file containing your login tokens. " +

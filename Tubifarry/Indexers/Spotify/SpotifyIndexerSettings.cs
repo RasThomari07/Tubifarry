@@ -58,8 +58,12 @@ namespace Tubifarry.Indexers.Spotify
         [FieldDefinition(12, Label = "Enable Fuzzy Matching", Type = FieldType.Checkbox, HelpText = "This can help match albums with slight spelling differences but may occasionally match incorrect albums.", Advanced = true)]
         public bool EnableFuzzyMatching { get; set; } = true;
 
-        [FieldDefinition(13, Label = "Track Count Tolerance", Type = FieldType.Number, HelpText = "Percentage tolerance for track count differences between Spotify and YouTube Music.", Advanced = true)]
-        public int TrackCountTolerance { get; set; } = 20;
+        // TrackCountTolerance now lives on YouTubeIndexerSettings (25/07/2026): the YouTube
+        // indexer needs the same setting and this class derives from it. Re-declaring it here
+        // would shadow the base property, and both Lidarr's SchemaBuilder (type.GetProperties())
+        // and System.Text.Json (ProviderRepository) would then see two members mapping to
+        // "trackCountTolerance" - a duplicate field in the UI, and a throw when the providers are
+        // loaded. The 0-50 rule in the validator above still applies to the inherited property.
 
         [FieldDefinition(14, Label = "Year Tolerance", Type = FieldType.Number, HelpText = "Number of years tolerance for release date differences between Spotify and YouTube Music.", Advanced = true)]
         public int YearTolerance { get; set; } = 2;

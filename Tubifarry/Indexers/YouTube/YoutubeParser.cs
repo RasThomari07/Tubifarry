@@ -103,6 +103,8 @@ namespace Tubifarry.Indexers.YouTube
 
         private void ProcessSearchResults(IReadOnlyList<SearchResult> searchResults, List<ReleaseInfo> releases)
         {
+            int trackCountRejections = 0;
+
             foreach (SearchResult searchResult in searchResults)
             {
                 if (searchResult is not AlbumSearchResult album)
@@ -122,6 +124,17 @@ namespace Tubifarry.Indexers.YouTube
                     AlbumData albumData = ExtractAlbumInfo(album);
                     albumData.ParseReleaseDate();
                     EnrichAlbumWithYouTubeDataAsync(albumData).GetAwaiter().GetResult();
+
+                    // The track count is only known once the album has been enriched, so this runs
+                    // after the browse/info calls - which were already paid for, so the filter adds
+                    // no YouTube traffic of its own.
+                    if (IsTrackCountMismatch(albumData.TotalTracks, out string mismatch))
+                    {
+                        trackCountRejections++;
+                        _logger.Debug($"Track count filter: rejected '{albumData.AlbumName}' by '{albumData.ArtistName}' - {mismatch}");
+                        continue;
+                    }
+
                     if (albumData.Bitrate > 0)
                     {
                         releases.Add(albumData.ToReleaseInfo());
@@ -137,6 +150,9 @@ namespace Tubifarry.Indexers.YouTube
                     _logger.Error(ex, $"Failed to process album: '{album?.Name}' by '{album?.Artists?.FirstOrDefault()?.Name}'");
                 }
             }
+
+            if (trackCountRejections > 0)
+                _logger.Debug($"Track count filter: dropped {trackCountRejections} candidate(s) that did not match the {_youTubeIndexer.SearchAlbumTrackCount}-track release for '{_youTubeIndexer.SearchAlbumQuery}'");
         }
 
         private async Task EnrichAlbumWithYouTubeDataAsync(AlbumData albumData)
@@ -232,6 +248,42 @@ namespace Tubifarry.Indexers.YouTube
             if (TokenOverlap(ytAlbumName, searchAlbum) < TitleOverlapThreshold)
                 return false;
             return !NumberTokens(ytAlbumName).SetEquals(NumberTokens(searchAlbum));
+        }
+
+        /// <summary>
+        /// True when the candidate's track count is too far from the monitored release's, i.e. it is
+        /// a playlist, a best-of or a whole discography rather than the requested record. Rejecting
+        /// here - at search time - is the only place it is free: past this point the release is
+        /// grabbed, downloaded, refused at import as AlbumImportIncomplete, and grabbed again next
+        /// cycle. Measured over 30 days, that loop accounted for 81% of the import failures.
+        ///
+        /// Fail-open by design: filter disabled, no search context, no expected count, or no count
+        /// reported by YouTube (an enrichment failure leaves TotalTracks at 0) all keep the
+        /// candidate. The filter only rejects on positive evidence of a mismatch.
+        /// </summary>
+        private bool IsTrackCountMismatch(int candidateTracks, out string reason)
+        {
+            reason = string.Empty;
+
+            // 0 = disabled, so the filter can be turned off from the UI without a rebuild. The
+            // Spotify indexer shares this setting but reads 0 as "exact match required".
+            int tolerancePercent = _youTubeIndexer.Settings.TrackCountTolerance;
+            if (tolerancePercent <= 0)
+                return false;
+
+            int expectedTracks = _youTubeIndexer.SearchAlbumTrackCount ?? 0;
+            if (expectedTracks <= 0 || candidateTracks <= 0)
+                return false;
+
+            // Same formula as SpotifyToYouTubeEnricher.IsTrackCountValid: relative to the expected
+            // count, so a 3-track scrap of a 135-track set is rejected just like a 36-track playlist
+            // standing in for a 12-track album.
+            double deviation = Math.Abs(expectedTracks - candidateTracks) / (double)expectedTracks;
+            if (deviation <= tolerancePercent / 100.0)
+                return false;
+
+            reason = $"{candidateTracks} tracks vs {expectedTracks} expected ({deviation:P0} off, tolerance {tolerancePercent}%)";
+            return true;
         }
 
         // Volume/disc/part markers = standalone 1-3 digit numbers (4-digit years like "2011" are

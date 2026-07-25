@@ -35,6 +35,7 @@ namespace Tubifarry.Indexers.YouTube
             // YouTube doesn't support RSS/recent releases functionality in a traditional sense
             _youTubeIndexer.SearchAlbumQuery = null;
             _youTubeIndexer.SearchArtistQuery = null;
+            _youTubeIndexer.SearchAlbumTrackCount = null;
             return new LazyIndexerPageableRequestChain();
         }
 
@@ -47,13 +48,26 @@ namespace Tubifarry.Indexers.YouTube
             _youTubeIndexer.SearchAlbumQuery = searchCriteria.AlbumQuery;
             _youTubeIndexer.SearchArtistQuery = searchCriteria.ArtistQuery;
 
+            // Expected track count for this exact search, so the parser can reject playlists and
+            // discographies before they are grabbed. Assigned unconditionally (null included):
+            // the indexer is a singleton, so a previous search would otherwise leak its value.
+            _youTubeIndexer.SearchAlbumTrackCount = GetExpectedTrackCount(searchCriteria.Albums);
+            _logger.Debug($"Track count filter: expecting {_youTubeIndexer.SearchAlbumTrackCount?.ToString() ?? "unknown (filter off)"} track(s) for '{searchCriteria.AlbumQuery}'");
+
             // AcceptableSizeSpecification rejects any release whose album has Duration=0 in the DB.
             // MusicBrainz lacks duration data for many older/niche releases; refresh never fixes this.
             // Patching the LazyLoaded cache in memory here is safe: the same Album object references
             // are later used by AcceptableSizeSpecification via searchCriteria.Albums.
             PatchZeroDurationAlbums(searchCriteria.Albums);
 
-            LazyIndexerPageableRequestChain chain = new(5);
+            // Fallback tiers (album only, then artist only) fire when a tier yields fewer releases
+            // than this threshold. 5 was fine while almost every candidate was kept; with the track
+            // count filter a good search often leaves 1-3 releases, so the artist-only tier - the one
+            // that surfaces playlists and discographies - would fire on nearly every album, at the
+            // cost of two extra YouTube calls per extra candidate. That traffic profile is what
+            // soft-blocked the IP on 9-12 Jul. At 1 the fallbacks only run when the primary search
+            // returns nothing. Put it back to 5 if searches start coming up empty too often.
+            LazyIndexerPageableRequestChain chain = new(1);
 
             // Primary search: album + artist
             if (!string.IsNullOrEmpty(searchCriteria.AlbumQuery) && !string.IsNullOrEmpty(searchCriteria.ArtistQuery))
@@ -84,11 +98,54 @@ namespace Tubifarry.Indexers.YouTube
             _youTubeIndexer.SearchAlbumQuery = null;
             _youTubeIndexer.SearchArtistQuery = searchCriteria.ArtistQuery;
 
+            // An artist search targets every monitored album at once (ReleaseSearchService fills
+            // searchCriteria.Albums with the whole list), so there is no single expected count.
+            _youTubeIndexer.SearchAlbumTrackCount = null;
+
             LazyIndexerPageableRequestChain chain = new(5);
             if (!string.IsNullOrEmpty(searchCriteria.ArtistQuery))
                 chain.AddFactory(() => GetRequests(searchCriteria.ArtistQuery, SearchCategory.Albums));
 
             return chain;
+        }
+
+        /// <summary>
+        /// Track count Lidarr expects for this search, read from the release the import will be
+        /// matched against. Returns null when it cannot be determined - no album, several albums,
+        /// no target release, or TrackCount left at 0 - in which case the filter stays off.
+        /// </summary>
+        private int? GetExpectedTrackCount(IList<Album>? albums)
+        {
+            // AlbumSearchCriteria always carries exactly one album (ReleaseSearchService.AlbumSearch
+            // builds it with a single-item list); anything else means we cannot tell which album the
+            // results should match, so we do not filter.
+            if (albums == null || albums.Count != 1)
+                return null;
+
+            try
+            {
+                AlbumRelease? release = GetTargetRelease(albums[0]);
+                return release == null || release.TrackCount <= 0 ? null : release.TrackCount;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, $"Track count filter: could not read the expected track count for '{albums[0].Title}'");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// The release the album will actually be imported against: the monitored one, or the first
+        /// available when the album accepts any release. Shared with AcceptableSize patching so both
+        /// features agree on which release is the reference.
+        /// </summary>
+        private static AlbumRelease? GetTargetRelease(Album album)
+        {
+            List<AlbumRelease>? releases = album.AlbumReleases?.Value;
+            if (releases == null)
+                return null;
+            return releases.FirstOrDefault(r => r.Monitored)
+                ?? (album.AnyReleaseOk ? releases.FirstOrDefault() : null);
         }
 
         private void PatchZeroDurationAlbums(IList<Album>? albums)
@@ -99,10 +156,7 @@ namespace Tubifarry.Indexers.YouTube
             {
                 try
                 {
-                    List<AlbumRelease>? releases = album.AlbumReleases?.Value;
-                    if (releases == null) continue;
-                    AlbumRelease? release = releases.FirstOrDefault(r => r.Monitored)
-                        ?? (album.AnyReleaseOk ? releases.FirstOrDefault() : null);
+                    AlbumRelease? release = GetTargetRelease(album);
                     if (release == null || release.TrackCount == 0 || release.Duration != 0) continue;
                     release.Duration = release.TrackCount * estimatePerTrackMs;
                     _logger.Debug($"AcceptableSize patch: '{album.Title}' — estimated {release.Duration / 60000}min ({release.TrackCount} tracks × 3:30)");
